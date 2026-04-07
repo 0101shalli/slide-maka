@@ -11,7 +11,6 @@ from app.schemas.presentation import (
     PresentationCreate,
     TaskStatusResponse,
 )
-from app.services.gemini_structurer import generate_slides_json
 from app.services.llm_structurer import build_prompt
 from app.services.parameter_calculator import compute_distribution
 from app.services.pptx_generator import build_pptx
@@ -59,27 +58,33 @@ def generate_presentation(payload: PresentationCreate, db: Session = Depends(get
     db.commit()
     db.refresh(record)
 
-    task = TaskStatus(presentation_id=record.id, status="Processing", message="Structuring content with Gemini...")
+    task = TaskStatus(presentation_id=record.id, status="Processing", message="Structuring content...")
     db.add(task)
     db.commit()
     db.refresh(task)
 
-    try:
-        prompt = build_prompt(payload.original_text, dist, payload.configuration.audience_level)
-        slides = generate_slides_json(prompt=prompt, requested_count=dist.total_slides)
+    prompt = build_prompt(payload.original_text, dist, payload.configuration.audience_level)
+    # Placeholder for LLM call; replace this block with actual client integration.
+    llm_slides = [
+        {
+            "title": f"Slide {i + 1}",
+            "bullets": [
+                f"Audience: {payload.configuration.audience_level}",
+                "Generated from structured prompt",
+                prompt[:120],
+            ],
+            "type": "theory" if i < dist.theory_slides else "practical",
+        }
+        for i in range(dist.total_slides)
+    ]
 
-        output = Path(settings.storage_dir) / f"presentation_{record.id}.pptx"
-        build_pptx(slides, dist.image_slides, output)
+    output = Path(settings.storage_dir) / f"presentation_{record.id}.pptx"
+    build_pptx(llm_slides, dist.image_slides, output)
 
-        record.file_path = str(output)
-        task.status = "Completed"
-        task.message = "Presentation generated successfully"
-        db.commit()
-    except Exception as exc:  # noqa: BLE001
-        task.status = "Failed"
-        task.message = f"Generation failed: {exc}"
-        db.commit()
-        raise HTTPException(status_code=500, detail=task.message) from exc
+    record.file_path = str(output)
+    task.status = "Completed"
+    task.message = "Presentation generated successfully"
+    db.commit()
 
     return TaskStatusResponse(
         task_id=task.id,
