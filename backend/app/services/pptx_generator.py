@@ -40,6 +40,45 @@ SLIDE_H = 5.625
 MARGIN = 0.6
 CONTENT_W = SLIDE_W - 2 * MARGIN
 
+# ---------------------------------------------------------------------------
+# Deck typography
+# ---------------------------------------------------------------------------
+
+# Default typeface and body size for every generated deck. The user may pick
+# another font and base size per request; sizes in this module are expressed
+# in "default body units" and scaled once at render time by _fs().
+DEFAULT_FONT_TYPE = "Arial"
+DEFAULT_BODY_PT = 16.0
+
+
+class _ActiveFont:
+    """The font settings for the deck currently being rendered."""
+
+    __slots__ = ("name", "scale")
+
+    def __init__(self, name: str = DEFAULT_FONT_TYPE, scale: float = 1.0):
+        self.name = name
+        self.scale = scale
+
+
+_ACTIVE_FONT = _ActiveFont()
+
+
+def _font_name() -> str:
+    return _ACTIVE_FONT.name
+
+
+def _fs(size: float) -> float:
+    """Scale a size (in default body units) into rendered points."""
+    return max(6.0, size * _ACTIVE_FONT.scale)
+
+
+def _bloom_display(level: str | None) -> str:
+    """Display form of a Bloom cognitive level ("analyze" -> "Analyze")."""
+    if not level:
+        return ""
+    return level.strip().capitalize()
+
 
 def hex_to_rgb(hex_color: str) -> RGBColor:
     hex_color = hex_color.lstrip("#")
@@ -123,7 +162,8 @@ def _add_formatted_paragraph(
     """Add a paragraph with formatted text (bold, italic, highlight)."""
     p = text_frame.add_paragraph()
     p.text = ""
-    p.font.size = Pt(font_size)
+    p.font.size = Pt(_fs(font_size))
+    p.font.name = _font_name()
     p.font.color.rgb = color_rgb
     p.space_after = Pt(8 if not is_heading else 12)
     p.level = 0
@@ -131,7 +171,8 @@ def _add_formatted_paragraph(
     if not is_heading:
         run = p.add_run()
         run.text = "•  "
-        run.font.size = Pt(font_size)
+        run.font.size = Pt(_fs(font_size))
+        run.font.name = _font_name()
         run.font.color.rgb = bullet_color_rgb or accent_color_rgb
     else:
         run = p.add_run()
@@ -141,7 +182,8 @@ def _add_formatted_paragraph(
     for part_text, formats in formatted_parts:
         run = p.add_run()
         run.text = part_text
-        run.font.size = Pt(font_size)
+        run.font.size = Pt(_fs(font_size))
+        run.font.name = _font_name()
         if formats.get("bold"):
             run.font.bold = True
         if formats.get("italic"):
@@ -202,7 +244,8 @@ def _add_text(slide, x_in, y_in, w_in, h_in, text, size, color_hex, bold=False, 
     p.alignment = align
     run = p.add_run()
     run.text = text
-    run.font.size = Pt(size)
+    run.font.size = Pt(_fs(size))
+    run.font.name = _font_name()
     run.font.bold = bold
     run.font.italic = italic
     run.font.color.rgb = hex_to_rgb(color_hex)
@@ -350,7 +393,7 @@ def _add_bg_picture(slide, image_path, w_in=SLIDE_W, h_in=SLIDE_H):
 def _bg_key(slide_type: str, has_image: bool = False) -> str:
     if slide_type == "cover":
         return "cover"
-    if slide_type == "outline":
+    if slide_type in ("outline", "objectives"):
         return "outline"
     if slide_type == "end":
         return "end"
@@ -432,6 +475,9 @@ def _render_fullscreen_image(prs, slide, palette, block, slide_data, keyword, bu
     _add_rect(slide, 0, band_h, SLIDE_W, 0.045, accent)
     st = slide_data.get("type")
     kicker = "Theory" if st == "theory" else ("Practical" if st == "practical" else None)
+    level = slide_data.get("bloom_level")
+    if kicker and level:
+        kicker = f"{kicker} · {_bloom_display(level)}"
     if kicker:
         _add_text(slide, MARGIN + 0.05, 0.12, CONTENT_W, 0.3, kicker, 12, _tint(accent, 0.45), bold=True)
     _add_text(slide, MARGIN + 0.05, 0.38, CONTENT_W, 0.5, slide_data.get("title", ""), 27, "#FFFFFF", bold=True)
@@ -495,7 +541,8 @@ def _add_image_panel(prs, slide, palette, x_in, y_in, w_in, h_in, keyword, point
     pc.alignment = PP_ALIGN.CENTER
     rc = pc.add_run()
     rc.text = caption[:60]
-    rc.font.size = Pt(10)
+    rc.font.size = Pt(_fs(10))
+    rc.font.name = _font_name()
     rc.font.bold = True
     rc.font.color.rgb = get_contrast_text_color(accent)
 
@@ -596,10 +643,11 @@ def _match_blocks(slides: list[dict], slide_order: list | None) -> dict[int, dic
     last_outline_block = None
     for i, slide in enumerate(slides):
         st = slide.get("type")
-        if st == "outline":
+        if st in ("outline", "objectives"):
             # A multi-slide outline reuses the first outline's block so the
             # continuation pages share its styling instead of consuming more
-            # template blocks.
+            # template blocks. The objectives slide is a list slide too, so it
+            # shares the outline block the same way.
             if last_outline_block is not None:
                 assigned[i] = last_outline_block
                 continue
@@ -608,6 +656,8 @@ def _match_blocks(slides: list[dict], slide_order: list | None) -> dict[int, dic
             )
         elif st in ("cover", "end"):
             pool_type = st if st in blocks_by_type else ("content" if "content" in blocks_by_type else None)
+        elif st == "quiz":
+            pool_type = "content" if "content" in blocks_by_type else None
         elif slide.get("image_url") and blocks_by_type.get("image"):
             pool_type = "image"
         elif blocks_by_type.get("content"):
@@ -619,7 +669,7 @@ def _match_blocks(slides: list[dict], slide_order: list | None) -> dict[int, dic
         block = _next(pool_type)
         if block is not None:
             assigned[i] = block
-            if st == "outline":
+            if st in ("outline", "objectives"):
                 last_outline_block = block
             continue
         # A content block can carry a "flavor" (theory/practical); prefer a match.
@@ -665,7 +715,8 @@ def _add_bullets(tf, bullets, size, color_hex, accent_hex, is_dark_bg=False, bul
             p.text = ""
             rc = p.add_run()
             rc.text = section_title
-            rc.font.size = Pt(size + 3)
+            rc.font.size = Pt(_fs(size + 3))
+            rc.font.name = _font_name()
             rc.font.bold = True
             rc.font.color.rgb = hex_to_rgb(accent_hex)
             p.space_after = Pt(8)
@@ -677,16 +728,19 @@ def _add_bullets(tf, bullets, size, color_hex, accent_hex, is_dark_bg=False, bul
             p = first
             used_first = True
         p.text = ""
-        p.font.size = Pt(size)
-        p.space_after = Pt(max(3.0, size * 0.45))
+        p.font.size = Pt(_fs(size))
+        p.font.name = _font_name()
+        p.space_after = Pt(max(3.0, _fs(size) * 0.45))
         run = p.add_run()
         run.text = "•  "
-        run.font.size = Pt(size)
+        run.font.size = Pt(_fs(size))
+        run.font.name = _font_name()
         run.font.color.rgb = hex_to_rgb(bullet_color or accent_hex)
         for part_text, fmt in _parse_formatted_text(bullet):
             run = p.add_run()
             run.text = part_text
-            run.font.size = Pt(size)
+            run.font.size = Pt(_fs(size))
+            run.font.name = _font_name()
             run.font.bold = bool(fmt.get("bold"))
             run.font.italic = bool(fmt.get("italic"))
             if fmt.get("color") == "accent":
@@ -734,7 +788,8 @@ def _render_cover(prs, slide, palette, block, slide_data, logo_path):
     p = tf.paragraphs[0]
     run = p.add_run()
     run.text = title
-    run.font.size = Pt(title_font)
+    run.font.size = Pt(_fs(title_font))
+    run.font.name = _font_name()
     run.font.bold = True
     run.font.color.rgb = hex_to_rgb(on_bg)
 
@@ -805,7 +860,8 @@ def _render_outline(prs, slide, palette, block, slide_data):
             p.space_after = Pt(6)
             r = p.add_run()
             r.text = text
-            r.font.size = Pt(14)
+            r.font.size = Pt(_fs(14))
+            r.font.name = _font_name()
             r.font.bold = True
             r.font.color.rgb = hex_to_rgb(accent)
             continue
@@ -818,20 +874,159 @@ def _render_outline(prs, slide, palette, block, slide_data):
             n += 1
         r1 = p.add_run()
         r1.text = chip_txt
-        r1.font.size = Pt(12)
+        r1.font.size = Pt(_fs(12))
+        r1.font.name = _font_name()
         r1.font.bold = True
         r1.font.color.rgb = hex_to_rgb(accent)
         r2 = p.add_run()
         r2.text = "   "
-        r2.font.size = Pt(12)
+        r2.font.size = Pt(_fs(12))
+        r2.font.name = _font_name()
         r3 = p.add_run()
         r3.text = text
-        r3.font.size = Pt(15)
+        r3.font.size = Pt(_fs(15))
+        r3.font.name = _font_name()
         r3.font.color.rgb = hex_to_rgb(text_color)
         if "..." in text or "Closing" in text or "Introduction" in text:
             r3.font.bold = True
             r3.font.color.rgb = hex_to_rgb(primary)
         tf.word_wrap = True
+
+
+def _render_objectives(prs, slide, palette, block, slide_data):
+    """The "Learning Objectives" slide: one Bloom-tagged objective per row.
+
+    Each row shows its number chip, the objective itself, and the Bloom level
+    as an accent chip on the right, so the taxonomy progression is visible at
+    a glance and the slide stays scannable (one idea per row, no clutter).
+    """
+    block = block or {}
+    bg_image = block.get("bg_image")
+    bg = block.get("backgroundColor") or palette["background"]
+    if bg_image:
+        _add_bg_picture(slide, bg_image)
+    else:
+        _set_bg(slide, bg)
+    _place_block_elements(slide, block)
+    accent = palette["accent"]
+    primary = palette["primary"]
+    text_color = _text_color_for(bg, block.get("textColor"), primary)
+
+    base_y = _add_header(prs, slide, palette,
+                         slide_data.get("title", "Learning Objectives"),
+                         slide_data.get("subtitle"), "minimal", accent,
+                         kicker="Bloom's Taxonomy")
+
+    entries = slide_data.get("objectives") or []
+    items = slide_data.get("bullets", [])
+    box = slide.shapes.add_textbox(Inches(MARGIN + 0.15), Inches(base_y + 0.1),
+                                  Inches(CONTENT_W - 0.3), Inches(3.6))
+    tf = box.text_frame
+    tf.word_wrap = True
+    first = True
+    index = 0
+    for item, entry in zip(items, entries + [None] * len(items)):
+        index += 1
+        p = tf.paragraphs[0] if first else tf.add_paragraph()
+        first = False
+        p.text = ""
+        p.space_after = Pt(_fs(15) * 0.5)
+        r1 = p.add_run()
+        r1.text = f"{index:02d}   "
+        r1.font.size = Pt(_fs(12))
+        r1.font.name = _font_name()
+        r1.font.bold = True
+        r1.font.color.rgb = hex_to_rgb(accent)
+        # The objective text: strip the leading "1. " the preview also shows.
+        text = re.sub(r"^\d+\.\s*", "", item or "")
+        level = (entry or {}).get("level")
+        if level:
+            text = re.sub(r"\s*\([^)]*\)\s*$", "", text)
+        r2 = p.add_run()
+        r2.text = text
+        r2.font.size = Pt(_fs(15))
+        r2.font.name = _font_name()
+        r2.font.color.rgb = hex_to_rgb(text_color)
+        if level:
+            r3 = p.add_run()
+            r3.text = f"   [{_bloom_display(level)}]"
+            r3.font.size = Pt(_fs(11))
+            r3.font.name = _font_name()
+            r3.font.bold = True
+            r3.font.color.rgb = hex_to_rgb(accent)
+
+
+def _render_quiz(prs, slide, palette, block, slide_data):
+    """A per-sub-topic assessment slide: a quick task band plus MCQ questions.
+
+    Cognitive-load layout: the active-learning task sits in its own highlighted
+    band, and the quiz questions in side-by-side cards with A/B/C option rows;
+    the correct answers are only in the speaker notes.
+    """
+    block = block or {}
+    bg_image = block.get("bg_image")
+    bg = block.get("backgroundColor") or palette["background"]
+    if bg_image:
+        _add_bg_picture(slide, bg_image)
+    else:
+        _set_bg(slide, bg)
+    _place_block_elements(slide, block)
+    accent = palette["accent"]
+    primary = palette["primary"]
+    text_color = _text_color_for(bg, block.get("textColor"), primary)
+
+    level = slide_data.get("bloom_level")
+    kicker = "Assessment" if not level else f"Assessment · {_bloom_display(level)}"
+    base_y = _add_header(prs, slide, palette,
+                         slide_data.get("title", "Check Your Understanding"),
+                         slide_data.get("subtitle"), "minimal", accent,
+                         kicker=kicker)
+
+    task = slide_data.get("task") or {}
+    task_text = task.get("text") or ""
+    questions = slide_data.get("questions") or []
+
+    footer_h = 0.45
+    top = base_y + 0.1
+
+    if task_text:
+        task_h = 0.78
+        _add_rect(slide, MARGIN, top, CONTENT_W, task_h, _tint(primary, 0.9),
+                  outline_hex=accent, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+        label = f"Quick task ({_bloom_display(task.get('level') or level)})"
+        _add_text(slide, MARGIN + 0.22, top + 0.08, CONTENT_W - 0.45, 0.3, label, 11,
+                  accent, bold=True)
+        _add_text(slide, MARGIN + 0.22, top + 0.36, CONTENT_W - 0.45, 0.38, task_text, 13,
+                  text_color, wrap=True)
+        top += task_h + 0.18
+
+    if not questions:
+        return
+
+    avail_h = SLIDE_H - footer_h - top
+    if len(questions) >= 2:
+        gap = 0.25
+        card_w = (CONTENT_W - gap) / 2
+        positions = [(MARGIN + i * (card_w + gap), card_w) for i in range(len(questions[:2]))]
+        questions = questions[:2]
+    else:
+        positions = [(MARGIN, CONTENT_W)]
+    for (x, w), question in zip(positions, questions):
+        _add_rect(slide, x, top, w, avail_h, "#FFFFFF", outline_hex=_tint(accent, 0.35),
+                  shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+        qx = x + 0.18
+        qw = w - 0.36
+        _add_text(slide, qx, top + 0.12, qw, 0.75, question.get("question", ""), 12,
+                  primary, bold=True, wrap=True)
+        options = question.get("options") or []
+        rows = [f"{letter}) {option}" for letter, option in zip("ABC", options)]
+        fitted = _fit_font_size(rows, qw, avail_h - 1.05, 13)
+        box = slide.shapes.add_textbox(Inches(qx), Inches(top + 0.95),
+                                       Inches(qw), Inches(avail_h - 1.1))
+        tf = box.text_frame
+        tf.word_wrap = True
+        _autofit_off(tf)
+        _add_bullets(tf, rows, fitted, text_color, accent)
 
 
 def _render_end(prs, slide, palette, block, slide_data):
@@ -871,7 +1066,8 @@ def _render_end(prs, slide, palette, block, slide_data):
             p.space_after = Pt(6)
             run = p.add_run()
             run.text = b
-            run.font.size = Pt(18)
+            run.font.size = Pt(_fs(18))
+            run.font.name = _font_name()
             run.font.color.rgb = hex_to_rgb(_tint(bg, 0.85))
     meta = [b for b in lines if "prepared by" in b.lower() or "contact:" in b.lower()]
     y = 4.15
@@ -909,16 +1105,21 @@ def _fit_font_size(bullets, width_in, height_in, base_size, min_size=9):
     """Shrink the type until the slide's own wording fits its box.
 
     Slides are no longer truncated to a fixed number of lines, so a dense
-    section has to fit the room it is given instead of losing sentences.
+    section has to fit the room it is given instead of losing sentences. The
+    fit is computed against the *rendered* size (the base size scaled by the
+    deck's selected font size) while the return value stays in default body
+    units, so the renderer's single _fs() scaling keeps the estimate honest.
     """
     if not any(b and b.strip() for b in bullets):
         return base_size
+    scale = _ACTIVE_FONT.scale
     size = base_size
     while size > min_size:
+        eff = _fs(size)
         # 0.55em average glyph width: measured against rendered decks, 0.5em
         # overestimated the characters per line and let dense slides
         # overflow. 1.22 is the leading.
-        chars_per_line = max(int(width_in * 72 / (0.55 * size)), 8)
+        chars_per_line = max(int(width_in * 72 / (0.55 * eff)), 8)
         lines = 0
         for bullet in bullets:
             if not bullet:
@@ -926,10 +1127,10 @@ def _fit_font_size(bullets, width_in, height_in, base_size, min_size=9):
             if bullet.startswith("**"):
                 # Rendered as a larger bold sub-heading, so it costs more room
                 # than a plain line and must be measured, not skipped.
-                lines += max(1, -(-len(bullet) // max(int(width_in * 72 / (0.55 * (size + 3))), 8)))
+                lines += max(1, -(-len(bullet) // max(int(width_in * 72 / (0.55 * _fs(size + 3))), 8)))
                 continue
             lines += max(1, -(-len(bullet) // chars_per_line))
-        needed = (lines * size * 1.22 + max(3.0, size * 0.45) * max(lines - 1, 0)) / 72
+        needed = (lines * eff * 1.22 + max(3.0, eff * 0.45) * max(lines - 1, 0)) / 72
         # Leave headroom: the real renderer wraps slightly differently, and
         # a slide that overflows hides its own text.
         if needed <= height_in * FIT_SAFETY_MARGIN:
@@ -971,7 +1172,12 @@ def _render_content(prs, slide, palette, block, slide_data, content_index):
         layout = "with-image"
 
     st = slide_data.get("type")
-    kicker = "Theory" if st == "theory" else ("Practical" if st == "practical" else None)
+    level = slide_data.get("bloom_level")
+    kicker = None
+    if st in ("theory", "practical"):
+        kicker = "Theory" if st == "theory" else "Practical"
+        if level:
+            kicker = f"{kicker} · {_bloom_display(level)}"
 
     if layout in ("fullscreen", "full-image"):
         _render_fullscreen_image(prs, slide, palette, block, slide_data, keyword, bullets)
@@ -1033,17 +1239,30 @@ def _write_speaker_notes(slide, speaker_notes):
             lines = []
             if speaker_notes.get("opening_remarks"):
                 lines.append(f"Opening: {speaker_notes.get('opening_remarks')}")
+            concepts = speaker_notes.get("core_concepts", [])
+            if concepts:
+                lines.append("Core concepts:")
+                lines.extend(f"  • {c}" for c in concepts[:3])
             points = speaker_notes.get("main_talking_points", [])
             if points:
                 lines.append("Key points:")
                 lines.extend(f"  • {p}" for p in points[:3])
+            if speaker_notes.get("active_learning"):
+                lines.append(f"Active learning: {speaker_notes.get('active_learning')}")
+            if speaker_notes.get("audience_engagement"):
+                lines.append(f"Engagement: {speaker_notes.get('audience_engagement')}")
+            if speaker_notes.get("answers"):
+                lines.append(f"Answer key: {speaker_notes.get('answers')}")
             if speaker_notes.get("key_takeaway"):
                 lines.append(f"Takeaway: {speaker_notes.get('key_takeaway')}")
+            if speaker_notes.get("bloom_level"):
+                lines.append(f"Bloom level: {speaker_notes.get('bloom_level')}")
             text = "\n".join(lines)
         else:
             text = str(speaker_notes)
         notes_tf.paragraphs[0].text = text
-        notes_tf.paragraphs[0].font.size = Pt(10)
+        notes_tf.paragraphs[0].font.size = Pt(_fs(10))
+        notes_tf.paragraphs[0].font.name = _font_name()
     except Exception:
         pass
 
@@ -1242,8 +1461,60 @@ def build_pptx(
     palette_id: int = 1,
     template_def: dict | None = None,
     base_template_path: str | Path | None = None,
+    font_type: str | None = None,
+    font_size: float | None = None,
 ) -> Path:
-    """Build a professional PPTX deck from the flat slide list."""
+    """Build a professional PPTX deck from the flat slide list.
+
+    ``font_type`` is the typeface for every text element (Arial by default) and
+    ``font_size`` the base body size in points (16 by default); all type in the
+    deck scales from it, so a larger value grows titles and body text together.
+    """
+    global _ACTIVE_FONT
+    previous_font = _ACTIVE_FONT
+    _ACTIVE_FONT = _ActiveFont(
+        _validate_font_type(font_type),
+        _font_scale(font_size),
+    )
+    try:
+        return _build_pptx_rendered(
+            slides, image_slides, output_path, logo_path, palette_id,
+            template_def, base_template_path,
+        )
+    finally:
+        _ACTIVE_FONT = previous_font
+
+
+def _validate_font_type(font_type: str | None) -> str:
+    """Accept any sane font family name; anything odd falls back to Arial."""
+    name = (font_type or "").strip()
+    if not name:
+        return DEFAULT_FONT_TYPE
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 '\-]{0,48}", name):
+        return DEFAULT_FONT_TYPE
+    return name
+
+
+def _font_scale(font_size: float | None) -> float:
+    """Body-size to scale factor, clamped to a sane range."""
+    if font_size is None:
+        return 1.0
+    try:
+        size = float(font_size)
+    except (TypeError, ValueError):
+        return 1.0
+    return max(0.6, min(2.0, size / DEFAULT_BODY_PT))
+
+
+def _build_pptx_rendered(
+    slides: list[dict],
+    image_slides: int,
+    output_path: Path,
+    logo_path: str | Path | None,
+    palette_id: int,
+    template_def: dict | None,
+    base_template_path: str | Path | None,
+) -> Path:
     if base_template_path:
         prs = Presentation(str(base_template_path))
     else:
@@ -1283,15 +1554,21 @@ def build_pptx(
             _render_cover(prs, slide, palette, block, slide_data, logo_path)
         elif slide_type == "outline":
             _render_outline(prs, slide, palette, block, slide_data)
+        elif slide_type == "objectives":
+            _render_objectives(prs, slide, palette, block, slide_data)
+        elif slide_type == "quiz":
+            _render_quiz(prs, slide, palette, block, slide_data)
         elif slide_type == "end":
             _render_end(prs, slide, palette, block, slide_data)
         else:
             # The outline can span several slides, so count the content slides
             # actually seen rather than assuming the outline is a single slide.
+            # Pedagogy slides (objectives/quiz) are not content sections, so they
+            # stay out of the alternation counter.
             content_index = sum(
                 1
                 for earlier in slides[:idx]
-                if earlier.get("type") not in ("cover", "outline", "end")
+                if earlier.get("type") not in ("cover", "outline", "end", "objectives", "quiz")
             )
             _render_content(prs, slide, palette, block, slide_data, content_index)
 
@@ -1311,6 +1588,8 @@ def execute_python_template(
     logo_path: str | Path | None,
     palette_id: int,
     template_def: dict | None = None,
+    font_type: str | None = None,
+    font_size: float | None = None,
 ) -> Path:
     """Execute a Python template script to generate the presentation."""
     namespace: dict = {"__name__": "__main__"}
@@ -1324,14 +1603,28 @@ def execute_python_template(
     if not callable(builder):
         raise RuntimeError("Python template must define a callable named build_template or build_presentation")
 
-    result = builder(
-        slides=slides,
-        image_slides=image_slides,
-        output_path=output_path,
-        logo_path=logo_path,
-        palette_id=palette_id,
-        template_def=template_def,
-    )
+    # Custom templates take the deck's typography with them, wrapped in a
+    # try so an older template that does not accept the kwargs still runs.
+    try:
+        result = builder(
+            slides=slides,
+            image_slides=image_slides,
+            output_path=output_path,
+            logo_path=logo_path,
+            palette_id=palette_id,
+            template_def=template_def,
+            font_type=_validate_font_type(font_type),
+            font_size=font_size if font_size is not None else DEFAULT_BODY_PT,
+        )
+    except TypeError:
+        result = builder(
+            slides=slides,
+            image_slides=image_slides,
+            output_path=output_path,
+            logo_path=logo_path,
+            palette_id=palette_id,
+            template_def=template_def,
+        )
     if isinstance(result, (str, Path)):
         return Path(result)
     return output_path
