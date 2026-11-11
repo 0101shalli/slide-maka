@@ -8,6 +8,11 @@ class PresentationConfig(BaseModel):
     theory_percent: int = Field(ge=0, le=100)
     audience_level: str
     palette_id: int
+    font_type: str = "Arial"
+    font_size: int = Field(default=16, ge=10, le=24)
+    enable_objectives: bool = True
+    enable_quizzes: bool = True
+    enable_posters: bool = True
 
 
 class SlidePreview(BaseModel):
@@ -18,6 +23,7 @@ class SlidePreview(BaseModel):
     engagement_hook: str | None = None
     speaker_notes: dict | None = None
     activities: dict | None = None
+    bloom_level: str | None = None
 
 
 class PresentationPreviewResponse(BaseModel):

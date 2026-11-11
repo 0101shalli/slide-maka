@@ -105,6 +105,11 @@ export function App() {
   const [imagePercent, setImagePercent] = useState(30);
   const [audienceLevel, setAudienceLevel] = useState("Beginner");
   const [paletteId, setPaletteId] = useState(1);
+  const [fontType, setFontType] = useState("Arial");
+  const [fontSize, setFontSize] = useState(16);
+  const [enableObjectives, setEnableObjectives] = useState(true);
+  const [enableQuizzes, setEnableQuizzes] = useState(true);
+  const [enablePosters, setEnablePosters] = useState(true);
   const [contentType, setContentType] = useState("text");
   const [text, setText] = useState("");
   const [contentFile, setContentFile] = useState(null);
@@ -963,6 +968,51 @@ const w = Math.max(Math.max(...xs) - minX, 2);
                 ))}
               </select>
             </label>
+
+            <label>
+              Font Type
+              <select value={fontType} onChange={(e) => setFontType(e.target.value)}>
+                {["Arial", "Calibri", "Cambria", "Georgia", "Times New Roman", "Verdana", "Tahoma", "Trebuchet MS", "Segoe UI", "Garamond"].map((font) => (
+                  <option value={font} key={font}>{font}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Font Size: {fontSize}pt
+              <select value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))}>
+                {[12, 13, 14, 15, 16, 17, 18, 20, 22, 24].map((size) => (
+                  <option value={size} key={size}>{size}pt</option>
+                ))}
+              </select>
+            </label>
+
+            <div className="radio-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={enableObjectives}
+                  onChange={(e) => setEnableObjectives(e.target.checked)}
+                />
+                Learning Objectives
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={enableQuizzes}
+                  onChange={(e) => setEnableQuizzes(e.target.checked)}
+                />
+                Check-Your-Understanding Quizzes
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={enablePosters}
+                  onChange={(e) => setEnablePosters(e.target.checked)}
+                />
+                Explanatory Posters
+              </label>
+            </div>
           </div>
 
           <PreviewCard
@@ -2260,6 +2310,11 @@ const w = Math.max(Math.max(...xs) - minX, 2);
     formData.append('theory_percent', theoryPercent.toString());
     formData.append('audience_level', audienceLevel);
     formData.append('palette_id', paletteId.toString());
+    formData.append('font_type', fontType);
+    formData.append('font_size', fontSize.toString());
+    formData.append('enable_objectives', enableObjectives.toString());
+    formData.append('enable_quizzes', enableQuizzes.toString());
+    formData.append('enable_posters', enablePosters.toString());
     if (templateId) {
       formData.append('template_id', templateId.toString());
     }

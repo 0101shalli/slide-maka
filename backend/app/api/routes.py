@@ -16,6 +16,7 @@ from ..schemas.presentation import (
     TaskStatusResponse,
 )
 from ..services.deck_builder import build_deck
+from ..services.bloom_taxonomy import PedagogyOptions
 from ..services.default_theme import DEFAULT_TEMPLATE
 from ..services.llm_structurer import build_prompt_input_prompt
 from ..services.parameter_calculator import compute_distribution
@@ -187,6 +188,11 @@ def preview_presentation(
     audience_level: str = Form(...),
     palette_id: int = Form(...),
     template_id: int | None = Form(None),
+    font_type: str = Form("Arial"),
+    font_size: int = Form(16),
+    enable_objectives: bool = Form(True),
+    enable_quizzes: bool = Form(True),
+    enable_posters: bool = Form(True),
     db: Session = Depends(get_db),
 ) -> PresentationPreviewResponse:
     original_text, llm_slides, figures = resolve_content(
@@ -218,6 +224,11 @@ def preview_presentation(
         username,
         email,
         figures,
+        pedagogy=PedagogyOptions(
+            objectives=enable_objectives,
+            quizzes=enable_quizzes,
+            posters=enable_posters,
+        ),
     )
 
     return PresentationPreviewResponse(
@@ -246,6 +257,11 @@ def generate_presentation(
     audience_level: str = Form(...),
     palette_id: int = Form(...),
     template_id: int | None = Form(None),
+    font_type: str = Form("Arial"),
+    font_size: int = Form(16),
+    enable_objectives: bool = Form(True),
+    enable_quizzes: bool = Form(True),
+    enable_posters: bool = Form(True),
     db: Session = Depends(get_db),
 ) -> PresentationGenerateResponse:
     original_text, llm_slides, figures = resolve_content(
@@ -267,6 +283,11 @@ def generate_presentation(
         "audience_level": audience_level,
         "palette_id": palette_id,
         "template_id": template_id,
+        "font_type": font_type,
+        "font_size": font_size,
+        "enable_objectives": enable_objectives,
+        "enable_quizzes": enable_quizzes,
+        "enable_posters": enable_posters,
     }
     dist = compute_distribution(
         slide_count,
@@ -314,6 +335,11 @@ def generate_presentation(
         user.username,
         user.email,
         figures,
+        pedagogy=PedagogyOptions(
+            objectives=enable_objectives,
+            quizzes=enable_quizzes,
+            posters=enable_posters,
+        ),
     )
     output = Path(settings.storage_dir) / f"presentation_{record.id}.pptx"
 
@@ -353,6 +379,8 @@ def generate_presentation(
             logo_path,
             palette_id,
             template_def=template_def,
+            font_type=font_type,
+            font_size=font_size,
         )
     else:
         build_pptx(
@@ -363,6 +391,8 @@ def generate_presentation(
             palette_id,
             template_def=template_def,
             base_template_path=base_template_path,
+            font_type=font_type,
+            font_size=font_size,
         )
 
     record.file_path = str(output)
