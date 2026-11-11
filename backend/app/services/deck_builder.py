@@ -24,6 +24,14 @@ from .parameter_calculator import Distribution, image_slide_indices
 from .practical_activities_generator import _get_default_activities
 from .content_planner import plan_content
 from .llm_structurer import select_slide_image
+from .bloom_taxonomy import (
+    LEVEL_DISPLAY,
+    PedagogyOptions,
+    attach_posters,
+    build_check_understanding_slide,
+    build_objectives_slide,
+    classify_bloom_level,
+)
 
 AUDIENCE_GUIDANCE = {
     "Beginner": "simple, clear and practical language",
@@ -218,6 +226,49 @@ def _default_speaker_notes(title: str, slide_type: str) -> Dict[str, Any]:
         "time_estimate": 90,
         "key_takeaway": f"Remember: {title} is important",
         "transition_to_next": "Let's continue with the next point.",
+    }
+
+
+# Active-learning prompt templates at each Bloom level; one is attached to
+# every content slide's speaker notes so the spoken delivery and the
+# assessment slides stay aligned.
+_ACTIVE_LEARNING = {
+    "remember": "Ask students to recall the key terms before moving on.",
+    "understand": "Ask a student to restate the concept in their own words.",
+    "apply": "Invite students to try the approach on a scenario of their own.",
+    "analyze": "Have students compare this with the previous sub-topic.",
+    "evaluate": "Ask students to judge when this is the right approach, and why.",
+    "create": "Challenge students to sketch their own version of the idea.",
+}
+
+
+def _lecture_speaker_notes(slide: Dict[str, Any], level: str) -> Dict[str, Any]:
+    """Lecture notes for one content slide, structured for teaching delivery.
+
+    The spoken content carries what the slide does not show in full: the core
+    concepts behind the on-slide lines, an active-learning prompt at the
+    slide's Bloom level, and the summary takeaway -- so the deck complements
+    rather than replicates the auditory explanation.
+    """
+    points = [
+        b for b in slide.get("bullets", [])
+        if b and b.strip() and not b.startswith("**")
+    ]
+    takeaway = _pick_takeaway(points) if points else f"Remember: {slide.get('title', 'this topic')}"
+    return {
+        "opening_remarks": f"Our next topic is: {slide.get('title', '')}",
+        "core_concepts": points[:3],
+        "main_talking_points": [
+            "Expand each on-slide line; do not read them aloud word for word.",
+            "Give a concrete example for the most technical line.",
+            "Link the idea back to the session's learning objective.",
+        ],
+        "active_learning": _ACTIVE_LEARNING.get(level, _ACTIVE_LEARNING["understand"]),
+        "audience_engagement": "Invite questions before revealing the next slide.",
+        "time_estimate": 90,
+        "key_takeaway": takeaway,
+        "transition_to_next": "Let's check this with a short task before moving on.",
+        "bloom_level": LEVEL_DISPLAY.get(level, "Understand"),
     }
 
 
@@ -751,13 +802,14 @@ def _build_outline(
     theory_positions,
     title: str = "",
 ) -> List[str]:
-    """Build a three-act outline from the final content slides.
+    """Build a hierarchical three-act outline from the final content slides.
 
     The outline is grouped under ``**Opening**`` / ``**Core Topics**`` /
     ``**Closing**`` act markers (rendered as distinct accent headings by the
     PPTX generator) and each topic is tagged with the slide's theory/practice
-    role so the user can see at a glance how the requested distribution is
-    applied.
+    role and its Bloom cognitive level, so the user can see at a glance how
+    the requested distribution is applied and how the lecture climbs the
+    taxonomy.
 
     The opening entry is the presentation's own title (falling back to the first
     content slide), so the outline opens with the actual subject instead of a
@@ -772,7 +824,9 @@ def _build_outline(
         positions = set(theory_positions)
         for i, slide in enumerate(content):
             tag = "Theory" if i in positions else "Practice"
-            items.append(f"{i + 2}. {slide.get('title', '')} ({tag})")
+            level = slide.get("bloom_level")
+            suffix = f"{tag} · {LEVEL_DISPLAY[level]}" if level else tag
+            items.append(f"{i + 2}. {slide.get('title', '')} ({suffix})")
     items.append("**Closing**")
     items.append(f"{len(content) + 2}. Key Takeaways & Next Steps")
     return items
@@ -882,13 +936,18 @@ def _assemble_deck(
     author_email: Optional[str],
     subtitle: Optional[str],
     figures: Optional[List[Any]],
+    pedagogy: Optional[PedagogyOptions] = None,
 ) -> List[Dict[str, Any]]:
     """Wrap finished content slides in the cover, outline, recap and end slides.
 
     Both input paths converge here, so the deck shape is identical whatever the
-    source was: ``content_slides + 4``, which is exactly the number the slide
-    calculator reserved.
+    source was. The pedagogy options add the higher-education structure on
+    top: a Bloom-tagged learning objectives slide after the cover, a Bloom
+    level plus lecture speaker notes on every sub-topic, an explanatory poster
+    for sections with context to depict, and a small task + quiz slide after
+    each sub-topic.
     """
+    pedagogy = pedagogy or PedagogyOptions()
     total_slides = max(distribution.total_slides, 4)
 
     cover = {
@@ -898,6 +957,16 @@ def _assemble_deck(
         "bullets": _audience_cover_bullets(audience_level, author_name, author_email),
         "type": "cover",
     }
+
+    # Bloom level and lecture speaker notes for every sub-topic.
+    for index, slide in enumerate(content):
+        level = classify_bloom_level(slide.get("title", ""), slide.get("bullets", []), index)
+        slide["bloom_level"] = level
+        slide["speaker_notes"] = _lecture_speaker_notes(slide, level)
+
+    objectives = (
+        build_objectives_slide(content) if pedagogy.objectives and content else None
+    )
 
     theory_positions = {
         index
@@ -915,7 +984,22 @@ def _assemble_deck(
         # Visuals are best-effort: the keyword heuristic is the fallback.
         visual_plan = {}
     content = _attach_image_slots(content, distribution.image_slides, figures, visual_plan)
+    # Sections with explainable context and no visual of their own earn an
+    # offline-drawn explanatory poster on its own full slide.
+    content = attach_posters(content, enabled=pedagogy.posters)
+
     takeaways = _build_takeaways_slide(content)
+
+    if pedagogy.quizzes:
+        # A small task and a short quiz after every sub-topic, each aligned
+        # with that sub-topic's Bloom objective.
+        sequenced: List[Dict[str, Any]] = []
+        for slide in content:
+            sequenced.append(slide)
+            check = build_check_understanding_slide(slide, content)
+            if check:
+                sequenced.append(check)
+        content = sequenced
 
     end = {
         "slide_number": 0,
@@ -929,7 +1013,10 @@ def _assemble_deck(
         "type": "end",
     }
 
-    slides = [cover] + outline_slides + content + [takeaways, end]
+    slides = [cover]
+    if objectives:
+        slides.append(objectives)
+    slides += outline_slides + content + [takeaways, end]
     # The outline may span several slides, so number the deck once at the end.
     for number, slide in enumerate(slides, start=1):
         slide["slide_number"] = number
@@ -944,6 +1031,7 @@ def build_deterministic_deck(
     author_name: Optional[str] = None,
     author_email: Optional[str] = None,
     figures: Optional[List[Any]] = None,
+    pedagogy: Optional[PedagogyOptions] = None,
 ) -> List[Dict[str, Any]]:
     """Assemble a full deck from structured text without any LLM call."""
     plan = plan_content(
@@ -965,6 +1053,7 @@ def build_deterministic_deck(
         author_email,
         presentation_data.get("subtitle"),
         figures,
+        pedagogy,
     )
 
 
@@ -981,6 +1070,7 @@ def build_prompt_deck(
     author_name: Optional[str] = None,
     author_email: Optional[str] = None,
     figures: Optional[List[Any]] = None,
+    pedagogy: Optional[PedagogyOptions] = None,
 ) -> List[Dict[str, Any]]:
     """Wrap LLM-structured slides into the full deck (cover / outline / end added here).
 
@@ -1006,6 +1096,7 @@ def build_prompt_deck(
         author_email,
         subtitle=None,
         figures=figures,
+        pedagogy=pedagogy,
     )
 
 
@@ -1041,6 +1132,7 @@ def build_deck(
     author_name: Optional[str] = None,
     author_email: Optional[str] = None,
     figures: Optional[List[Any]] = None,
+    pedagogy: Optional[PedagogyOptions] = None,
 ) -> List[Dict[str, Any]]:
     """Build the final slide list based on the content source.
 
@@ -1053,7 +1145,8 @@ def build_deck(
         if not llm_slides:
             llm_slides = []
         return build_prompt_deck(
-            llm_slides, distribution, audience_level, title, author_name, author_email, figures
+            llm_slides, distribution, audience_level, title, author_name, author_email,
+            figures, pedagogy
         )
 
     from .text_structurer import structure_text
@@ -1067,4 +1160,5 @@ def build_deck(
         author_name,
         author_email,
         figures,
+        pedagogy,
     )
