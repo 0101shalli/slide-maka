@@ -218,3 +218,92 @@ def test_outline_numbering_continues_across_rendered_pages():
     assert "04" in text
     assert "05" in text
     assert "01" not in text
+
+
+def _blank_slide():
+    prs = Presentation()
+    prs.slide_width = pptx_generator.Inches(pptx_generator.SLIDE_W)
+    prs.slide_height = pptx_generator.Inches(pptx_generator.SLIDE_H)
+    return prs, prs.slides.add_slide(prs.slide_layouts[6])
+
+
+def test_objectives_slide_renders_each_level_chip():
+    prs, slide = _blank_slide()
+    data = {
+        "title": "Learning Objectives",
+        "subtitle": "By the end of this session:",
+        "bullets": ["1. Define databases (Remember)", "2. Design a schema (Create)"],
+        "objectives": [
+            {"topic": "databases", "level": "remember", "text": "Define databases"},
+            {"topic": "a schema", "level": "create", "text": "Design a schema"},
+        ],
+        "type": "objectives",
+    }
+    pptx_generator._render_objectives(prs, slide, pptx_generator.PALETTES[1], {}, data)
+    text = " ".join(
+        shape.text_frame.text for shape in slide.shapes if shape.has_text_frame
+    )
+    assert "Define databases" in text
+    assert "Design a schema" in text
+    assert "[Remember]" in text
+    assert "[Create]" in text
+
+
+def test_quiz_slide_renders_task_questions_and_hides_answers():
+    prs, slide = _blank_slide()
+    data = {
+        "title": "Check Your Understanding: Indexes",
+        "subtitle": "Small task and quick quiz",
+        "bullets": [],
+        "type": "quiz",
+        "bloom_level": "apply",
+        "task": {"level": "apply", "text": "Apply an index to a short scenario."},
+        "questions": [
+            {
+                "question": "Which statement is correct?",
+                "options": ["An index speeds up lookups.", "An index stores rows twice.", "An index removes ACID."],
+                "answer_index": 0,
+            }
+        ],
+        "speaker_notes": {"answers": "Q1: A"},
+    }
+    pptx_generator._render_quiz(prs, slide, pptx_generator.PALETTES[1], {}, data)
+    text = " ".join(
+        shape.text_frame.text for shape in slide.shapes if shape.has_text_frame
+    )
+    assert "Quick task (Apply)" in text
+    assert "Apply an index to a short scenario." in text
+    assert "Which statement is correct?" in text
+    assert "A) An index speeds up lookups." in text
+    assert "Q1: A" not in text
+
+
+def test_font_settings_validate_and_scale_typography():
+    assert pptx_generator._validate_font_type("Georgia") == "Georgia"
+    assert pptx_generator._validate_font_type("Noto Sans") == "Noto Sans"
+    assert pptx_generator._validate_font_type("") == "Arial"
+    assert pptx_generator._validate_font_type("Bad;Font{") == "Arial"
+    assert pptx_generator._font_scale(None) == 1.0
+    assert pptx_generator._font_scale(16) == 1.0
+    assert pptx_generator._font_scale(24) == 1.5
+    assert pptx_generator._font_scale(2) == 0.6
+
+
+def test_build_pptx_applies_the_requested_font(tmp_path):
+    deck = [
+        {"slide_number": 1, "title": "Cover", "bullets": ["Line"], "type": "cover"},
+        {"slide_number": 2, "title": "Thank You", "bullets": ["Questions"], "type": "end"},
+    ]
+    out = build_pptx(deck, 0, tmp_path / "font.pptx", palette_id=1,
+                     font_type="Georgia", font_size=20)
+    prs = Presentation(out)
+    runs = [
+        run
+        for slide in prs.slides
+        for shape in slide.shapes
+        if shape.has_text_frame
+        for paragraph in shape.text_frame.paragraphs
+        for run in paragraph.runs
+    ]
+    assert runs
+    assert all(run.font.name == "Georgia" for run in runs if run.text)
