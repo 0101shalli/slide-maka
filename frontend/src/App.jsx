@@ -138,7 +138,7 @@ export function App() {
   const [userSlidesError, setUserSlidesError] = useState(null);
   const [templatesError, setTemplatesError] = useState(null);
   const isAdmin = true; // Set this to false for non-admin users
-  const apiBase = "http://localhost:8001";
+  const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8001";
 
   const theme = "light";
   const [themeDark, setThemeDark] = useState(false);
