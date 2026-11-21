@@ -1,1 +1,17 @@
-venv/ and __pycache__/ 
+.git
+.gitignore
+.env
+.venv/
+venv/
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
+.pytest_cache/
+generated/
+tmp/
+tests/
+test_output*.pptx
+default_logo.png
+commands.txt
+requirements1.txt
+pyproject.toml

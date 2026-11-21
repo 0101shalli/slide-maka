@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+RUN mkdir -p /app/generated
 
 COPY requirements.txt .
 ENV PIP_DEFAULT_TIMEOUT=200
@@ -20,4 +21,4 @@ RUN python3 -m pip install --no-cache-dir --default-timeout=200 --retries=20 \
 COPY app ./app
 
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
