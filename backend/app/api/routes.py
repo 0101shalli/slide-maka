@@ -1,9 +1,11 @@
 from pathlib import Path
 import logging
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Form, File, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
@@ -141,6 +143,23 @@ def fetch_user_identity(db: Session, user_id: int) -> tuple[User | None, str, st
 
 @router.on_event("startup")
 def create_tables() -> None:
+    storage_root = Path(settings.storage_dir)
+    storage_root.mkdir(parents=True, exist_ok=True)
+    (storage_root / "assets").mkdir(parents=True, exist_ok=True)
+    (storage_root / "templates").mkdir(parents=True, exist_ok=True)
+
+    for attempt in range(10):
+        try:
+            _initialize_database()
+            return
+        except SQLAlchemyError:
+            if attempt == 9:
+                raise
+            logger.warning("Database not ready, retrying in 2s (%s/10)", attempt + 1)
+            time.sleep(2)
+
+
+def _initialize_database() -> None:
     Base.metadata.create_all(bind=engine)
 
     inspector = inspect(engine)
@@ -154,7 +173,33 @@ def create_tables() -> None:
             if "is_active" not in columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN is_active boolean NOT NULL DEFAULT true"))
 
+    ensure_default_user()
     ensure_default_template()
+
+
+def ensure_default_user() -> None:
+    with Session(bind=engine) as db:
+        if db.get(User, 1) is not None:
+            return
+        username = "admin"
+        email = "admin@slidemaka.local"
+        suffix = 2
+        while db.query(User.id).filter((User.username == username) | (User.email == email)).first() is not None:
+            username = f"admin{suffix}"
+            email = f"admin{suffix}@slidemaka.local"
+            suffix += 1
+        db.add(
+            User(
+                id=1,
+                username=username,
+                email=email,
+                password_hash="",
+                is_admin=True,
+                role="admin",
+                is_active=True,
+            )
+        )
+        db.commit()
 
 
 def ensure_default_template() -> None:
