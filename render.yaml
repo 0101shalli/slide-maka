@@ -21,8 +21,24 @@ services:
           property: connectionString
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash
+      - key: GEMINI_THINKING_LEVEL
+        value: minimal
+      - key: GEMINI_SLIDES_CACHE_TTL
+        value: "1800"
+      - key: ENABLE_DETAILED_AI_CONTENT
+        value: "false"
+      - key: ENABLE_AI_VISUAL_PLANNER
+        value: "true"
+      - key: IMAGE_PREFETCH_WORKERS
+        value: "6"
+      - key: ENABLE_LEGACY_UNSPLASH
+        value: "false"
+      - key: SLIDEMAKA_SSL_VERIFY
+        value: "1"
       - key: STORAGE_DIR
-        value: generated
+        value: /app/generated
 
   - type: web
     name: slide-maka-frontend
